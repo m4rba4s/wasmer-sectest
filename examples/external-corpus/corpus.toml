@@ -1,0 +1,17 @@
+[[case]]
+file = "external_good.wat"
+name = "external_good_packet"
+expected = "OK"
+category = "external"
+severity = "info"
+description = "external WAT positive-control packet"
+control = "valid external corpus module crosses the host boundary"
+
+[[case]]
+file = "external_overflow.wat"
+name = "external_ptr_len_overflow"
+expected = "ERR_BOUNDS"
+category = "external-memory"
+severity = "critical"
+description = "external WAT guest wraps ptr + len"
+control = "checked_add catches overflow for external corpus modules"

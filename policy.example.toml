@@ -1,0 +1,11 @@
+# Minimal TOML-like policy file accepted by the harness without extra runtime deps.
+# Keys not listed here are rejected deliberately so policy drift is explicit.
+
+max_packet_len = 4096
+max_cap_string_len = 256
+max_alloc = 65536
+initial_fuel = 256
+max_memory_pages = 16
+require_tick_import = true
+supervisor_timeout_ms = 250
+allowed_paths = ["/sandbox/allowed.txt"]

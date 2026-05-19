@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Full corpus
+        run: cargo run --locked --release -- --profile all --summary-only --no-color
+
+      - name: Singlepass backend
+        run: cargo run --locked --release -- --profile all --backend singlepass --summary-only --no-color
+
+      - name: Process supervisor
+        run: cargo run --locked --release -- --case non_cooperative_loop --isolate process --timeout-ms 100 --no-color
+
+      - name: Explicit policy
+        run: cargo run --locked --release -- --policy policy.example.toml --profile all --summary-only --no-color
+
+      - name: External corpus
+        run: cargo run --locked --release -- --corpus examples/external-corpus --no-color
+
+      - name: Evidence reports
+        run: |
+          cargo run --locked --release -- --profile interview --format markdown --report target/interview-report.md
+          cargo run --locked --release -- --profile all --format sarif --report target/wasmer-harness.sarif
