@@ -69,11 +69,22 @@ Install smoke test through `curl` from a local checkout:
 curl -fsSL file://$PWD/scripts/install.sh | bash -s -- --check --source-dir "$PWD"
 ```
 
+Install from GitHub without cloning first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/m4rba4s/wasmer-sectest/main/scripts/install.sh | bash -s -- --check
+```
+
 Install the release binary into a local directory:
 
 ```bash
 curl -fsSL file://$PWD/scripts/install.sh | bash -s -- --source-dir "$PWD" --install-dir "$PWD/target/install-bin"
 ```
+
+The installer provisions the build dependencies it can manage on the current
+platform, then bootstraps `rustup` so `cargo`, `rustfmt`, and `clippy` are
+available before the build starts. On macOS, Homebrew is used when present; if
+Homebrew is missing, install Xcode Command Line Tools first.
 
 Non-animated interview output:
 
