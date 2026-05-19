@@ -63,6 +63,18 @@ Equivalent direct command:
 cargo run --release -- --interview --tui
 ```
 
+Install smoke test through `curl` from a local checkout:
+
+```bash
+curl -fsSL file://$PWD/scripts/install.sh | bash -s -- --check --source-dir "$PWD"
+```
+
+Install the release binary into a local directory:
+
+```bash
+curl -fsSL file://$PWD/scripts/install.sh | bash -s -- --source-dir "$PWD" --install-dir "$PWD/target/install-bin"
+```
+
 Non-animated interview output:
 
 ```bash

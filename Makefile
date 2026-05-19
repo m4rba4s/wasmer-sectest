@@ -1,4 +1,4 @@
-.PHONY: help build test ci run menu tui interview campaign policy corpus stress list singlepass supervisor matrix emit-wasm report-json report-md report-sarif report-interview report-campaign
+.PHONY: help build test ci run menu tui interview campaign policy corpus stress list singlepass supervisor matrix emit-wasm report-json report-md report-sarif report-interview report-campaign install-check install-local
 
 help:
 	@printf '%s\n' \
@@ -23,7 +23,9 @@ help:
 	  '  report-json       write resource JSON report' \
 	  '  report-sarif      write CI-native SARIF report' \
 	  '  report-interview  write curated interview Markdown report' \
-	  '  report-campaign   write adversary-emulation Markdown report'
+	  '  report-campaign   write adversary-emulation Markdown report' \
+	  '  install-check     verify install path via curl bootstrap' \
+	  '  install-local     install release binary into target/install-bin'
 
 build:
 	cargo build --release
@@ -95,3 +97,9 @@ report-interview:
 
 report-campaign:
 	cargo run --release -- --profile campaign --format markdown --report target/adversary-campaign.md
+
+install-check:
+	curl -fsSL file://$(CURDIR)/scripts/install.sh | bash -s -- --check --source-dir "$(CURDIR)"
+
+install-local:
+	curl -fsSL file://$(CURDIR)/scripts/install.sh | bash -s -- --source-dir "$(CURDIR)" --install-dir "$(CURDIR)/target/install-bin"
