@@ -1,4 +1,4 @@
-##Wasmer Hostile-Guest Security Harness
+ # Wasmer Hostile-Guest Security Harness
 
 Rust security harness for Wasmer host imports. The tool runs a deterministic corpus of hostile WebAssembly guests against a hardened Rust host, records every guest-host ABI decision, and can present the same evidence as a live terminal cockpit, text output, Markdown, JSON, or SARIF.
 
