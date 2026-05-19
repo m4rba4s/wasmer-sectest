@@ -10,3 +10,4 @@ pub mod session;
 pub mod supervisor;
 pub mod telemetry;
 pub mod tui;
+pub mod visual;

@@ -15,6 +15,9 @@ struct CaseMetadata {
     severity: Option<String>,
     description: Option<String>,
     control: Option<String>,
+    stage: Option<String>,
+    ttp: Option<String>,
+    detection: Option<String>,
 }
 
 pub fn load_corpus(dir: &str) -> Result<Vec<GuestCase>, String> {
@@ -107,6 +110,9 @@ fn parse_manifest(contents: &str) -> Result<HashMap<String, CaseMetadata>, Strin
             "severity" => case.severity = Some(value),
             "description" => case.description = Some(value),
             "control" => case.control = Some(value),
+            "stage" => case.stage = Some(value),
+            "ttp" => case.ttp = Some(value),
+            "detection" => case.detection = Some(value),
             other => return Err(format!("line {line_number}: unsupported key '{other}'")),
         }
     }
@@ -171,6 +177,7 @@ fn load_case(path: &Path, rel: &str, meta: Option<CaseMetadata>) -> Result<Guest
         ),
         _ => return Err(format!("unsupported guest module {}", path.display())),
     };
+    let category = meta.category.unwrap_or_else(|| "external".into());
 
     Ok(GuestCase {
         name,
@@ -179,11 +186,20 @@ fn load_case(path: &Path, rel: &str, meta: Option<CaseMetadata>) -> Result<Guest
             .unwrap_or_else(|| format!("external corpus module {rel}")),
         expected_code: meta.expected_code.unwrap_or(abi::OK),
         kind: meta.kind.unwrap_or(CaseKind::RunExport),
-        category: meta.category.unwrap_or_else(|| "external".into()),
+        category,
         severity: meta.severity.unwrap_or_else(|| "info".into()),
         control: meta
             .control
             .unwrap_or_else(|| "observe external guest under configured host policy".into()),
+        stage: meta
+            .stage
+            .unwrap_or_else(|| "external corpus validation".into()),
+        ttp: meta
+            .ttp
+            .unwrap_or_else(|| "external-host-import-abuse".into()),
+        detection: meta.detection.unwrap_or_else(|| {
+            "external guest telemetry records configured boundary decisions".into()
+        }),
         source_path: path.to_string_lossy().replace('\\', "/"),
         source,
     })

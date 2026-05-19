@@ -295,7 +295,13 @@ impl SecurityDashboard {
             self.paint(ansi::CYAN, abi::code_name(case.expected_code))
         );
         println!("attack  {}", truncate(&case.description, DETAIL_WIDTH));
+        println!(
+            "ttp     {} / {}",
+            truncate(&case.stage, 40),
+            truncate(&case.ttp, 54)
+        );
         println!("control {}", truncate(&case.control, DETAIL_WIDTH));
+        println!("detect  {}", truncate(&case.detection, DETAIL_WIDTH));
 
         let Some(report) = current_report else {
             println!(

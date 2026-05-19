@@ -9,10 +9,11 @@ use crate::telemetry::{Gate, ImportEvent};
 pub fn print_case_list(cases: &[crate::guests::GuestCase]) {
     for case in cases {
         println!(
-            "{:<22} {:<10} {:<8} expected {:<16} {}",
+            "{:<22} {:<10} {:<8} {:<24} expected {:<16} {}",
             case.name,
             case.category,
             case.severity,
+            case.ttp,
             abi::code_name(case.expected_code),
             case.description
         );
@@ -31,6 +32,7 @@ pub fn print_interview_report(reports: &[CaseReport], policy: &Policy, color: bo
     print_header(reports, policy, color);
     println!("mode: interview narrative");
     println!("threat model: malicious guest controls linear memory and import arguments");
+    println!("adversary emulation: deterministic APT-style TTP chain without weaponized behavior");
     println!();
 
     for report in reports {
@@ -133,8 +135,8 @@ pub fn render_markdown_report(reports: &[CaseReport], policy: &Policy) -> String
         policy.supervisor_timeout_ms
     ));
     out.push_str("## Cases\n\n");
-    out.push_str("| Case | Category | Severity | Expected | Actual | Result |\n");
-    out.push_str("|---|---|---:|---|---|---|\n");
+    out.push_str("| Case | Stage | TTP | Category | Severity | Expected | Actual | Result |\n");
+    out.push_str("|---|---|---|---|---:|---|---|---|\n");
     for report in reports {
         let actual = report
             .actual_code
@@ -142,8 +144,10 @@ pub fn render_markdown_report(reports: &[CaseReport], policy: &Policy) -> String
             .unwrap_or("HOST_ERROR");
         let result = if report.passed() { "PASS" } else { "FAIL" };
         out.push_str(&format!(
-            "| `{}` | {} | {} | `{}` | `{}` | {} |\n",
+            "| `{}` | {} | `{}` | {} | {} | `{}` | `{}` | {} |\n",
             report.name,
+            report.stage,
+            report.ttp,
             report.category,
             report.severity,
             abi::code_name(report.expected_code),
@@ -155,8 +159,11 @@ pub fn render_markdown_report(reports: &[CaseReport], policy: &Policy) -> String
     for report in reports {
         out.push_str(&format!("### `{}`\n\n", report.name));
         out.push_str(&format!(
-            "- Attack: {}\n- Control: {}\n- Runtime: compile={}us instantiate={}us run={}us\n",
+            "- Attack: {}\n- Stage: {}\n- TTP: `{}`\n- Detection: {}\n- Control: {}\n- Runtime: compile={}us instantiate={}us run={}us\n",
             report.description,
+            report.stage,
+            report.ttp,
+            report.detection,
             report.control,
             report.compile_us,
             report.instantiate_us,
@@ -272,7 +279,12 @@ pub fn render_text_report(reports: &[CaseReport], policy: &Policy) -> String {
             actual,
             report.description
         ));
+        out.push_str(&format!(
+            "  emulation: stage={} ttp={}\n",
+            report.stage, report.ttp
+        ));
         out.push_str(&format!("  control: {}\n", report.control));
+        out.push_str(&format!("  detection: {}\n", report.detection));
         if let Some(event) = report.telemetry.events.last() {
             out.push_str(&format!(
                 "  boundary: {} => {} {} gates={} evidence={}\n",
@@ -315,7 +327,9 @@ fn print_interview_case(report: &CaseReport, color: bool) {
         "  class: category={} severity={}",
         report.category, report.severity
     );
+    println!("  emulation: stage={} ttp={}", report.stage, report.ttp);
     println!("  control: {}", report.control);
+    println!("  detection: {}", report.detection);
     println!(
         "  runtime: compile={}us instantiate={}us run={}us memory_pages {}->{}",
         report.compile_us,
@@ -393,7 +407,9 @@ fn print_case(report: &CaseReport, color: bool) {
         "[{}] {:<22} {:<10} {:<8} expected {:<16} got {:<16} {}",
         badge, report.name, report.category, report.severity, expected, actual, report.description
     );
+    println!("  emulation: stage={} ttp={}", report.stage, report.ttp);
     println!("  control: {}", report.control);
+    println!("  detection: {}", report.detection);
 
     if let Some(error) = &report.host_error {
         println!("  host_error: {error}");
@@ -509,12 +525,24 @@ fn render_json_case(report: &CaseReport) -> String {
         json_escape(&report.severity)
     ));
     out.push_str(&format!(
+        "      \"stage\": \"{}\",\n",
+        json_escape(&report.stage)
+    ));
+    out.push_str(&format!(
+        "      \"ttp\": \"{}\",\n",
+        json_escape(&report.ttp)
+    ));
+    out.push_str(&format!(
         "      \"description\": \"{}\",\n",
         json_escape(&report.description)
     ));
     out.push_str(&format!(
         "      \"control\": \"{}\",\n",
         json_escape(&report.control)
+    ));
+    out.push_str(&format!(
+        "      \"detection\": \"{}\",\n",
+        json_escape(&report.detection)
     ));
     out.push_str(&format!(
         "      \"expected\": \"{}\",\n",
@@ -547,15 +575,18 @@ fn render_json_case(report: &CaseReport) -> String {
 
 fn render_sarif_rule(report: &CaseReport) -> String {
     format!(
-        "            {{\"id\": \"{}\", \"name\": \"{}\", \"shortDescription\": {{\"text\": \"{}\"}}, \"fullDescription\": {{\"text\": \"{}\"}}, \"properties\": {{\"category\": \"{}\", \"severity\": \"{}\", \"expected\": \"{}\", \"control\": \"{}\"}}}}",
+        "            {{\"id\": \"{}\", \"name\": \"{}\", \"shortDescription\": {{\"text\": \"{}\"}}, \"fullDescription\": {{\"text\": \"{}\"}}, \"properties\": {{\"category\": \"{}\", \"severity\": \"{}\", \"stage\": \"{}\", \"ttp\": \"{}\", \"expected\": \"{}\", \"control\": \"{}\", \"detection\": \"{}\"}}}}",
         sarif_rule_id(report),
         json_escape(&report.name),
         json_escape(&report.description),
         json_escape(&report.control),
         json_escape(&report.category),
         json_escape(&report.severity),
+        json_escape(&report.stage),
+        json_escape(&report.ttp),
         abi::code_name(report.expected_code),
-        json_escape(&report.control)
+        json_escape(&report.control),
+        json_escape(&report.detection)
     )
 }
 
@@ -576,7 +607,7 @@ fn render_sarif_result(report: &CaseReport) -> String {
         })
         .unwrap_or("no boundary telemetry captured");
     format!(
-        "        {{\"ruleId\": \"{}\", \"level\": \"{}\", \"message\": {{\"text\": \"{} expected {} but got {}; {}\"}}, \"locations\": [{{\"physicalLocation\": {{\"artifactLocation\": {{\"uri\": \"{}\"}}, \"region\": {{\"startLine\": 1}}}}}}], \"properties\": {{\"category\": \"{}\", \"severity\": \"{}\", \"expected\": \"{}\", \"actual\": \"{}\", \"control\": \"{}\"}}}}",
+        "        {{\"ruleId\": \"{}\", \"level\": \"{}\", \"message\": {{\"text\": \"{} expected {} but got {}; {}\"}}, \"locations\": [{{\"physicalLocation\": {{\"artifactLocation\": {{\"uri\": \"{}\"}}, \"region\": {{\"startLine\": 1}}}}}}], \"properties\": {{\"category\": \"{}\", \"severity\": \"{}\", \"stage\": \"{}\", \"ttp\": \"{}\", \"expected\": \"{}\", \"actual\": \"{}\", \"control\": \"{}\", \"detection\": \"{}\"}}}}",
         sarif_rule_id(report),
         sarif_level(report),
         json_escape(&report.name),
@@ -586,9 +617,12 @@ fn render_sarif_result(report: &CaseReport) -> String {
         json_escape(&report.source_path),
         json_escape(&report.category),
         json_escape(&report.severity),
+        json_escape(&report.stage),
+        json_escape(&report.ttp),
         abi::code_name(report.expected_code),
         actual,
-        json_escape(&report.control)
+        json_escape(&report.control),
+        json_escape(&report.detection)
     )
 }
 

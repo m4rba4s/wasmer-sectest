@@ -238,12 +238,24 @@ fn render_case_json(report: &CaseReport) -> String {
         json_escape(&report.severity)
     ));
     out.push_str(&format!(
+        "      \"stage\": \"{}\",\n",
+        json_escape(&report.stage)
+    ));
+    out.push_str(&format!(
+        "      \"ttp\": \"{}\",\n",
+        json_escape(&report.ttp)
+    ));
+    out.push_str(&format!(
         "      \"description\": \"{}\",\n",
         json_escape(&report.description)
     ));
     out.push_str(&format!(
         "      \"control\": \"{}\",\n",
         json_escape(&report.control)
+    ));
+    out.push_str(&format!(
+        "      \"detection\": \"{}\",\n",
+        json_escape(&report.detection)
     ));
     out.push_str(&format!(
         "      \"source_path\": \"{}\",\n",

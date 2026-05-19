@@ -35,6 +35,9 @@ pub struct GuestCase {
     pub category: String,
     pub severity: String,
     pub control: String,
+    pub stage: String,
+    pub ttp: String,
+    pub detection: String,
     pub source_path: String,
     pub source: GuestSource,
 }
@@ -292,6 +295,7 @@ pub fn profile_cases(profile: Profile) -> Vec<GuestCase> {
     match profile {
         Profile::All => all_cases(),
         Profile::Interview => interview_cases(),
+        Profile::Campaign => campaign_cases(),
         Profile::Abi => cases_by_category(&["abi", "integrity"]),
         Profile::Capability => cases_by_category(&["capability"]),
         Profile::Resource => cases_by_category(&["resource"]),
@@ -322,6 +326,29 @@ pub fn interview_cases() -> Vec<GuestCase> {
     .collect()
 }
 
+pub fn campaign_cases() -> Vec<GuestCase> {
+    [
+        "good_packet",
+        "bad_version",
+        "body_len_mismatch",
+        "checksum_mismatch",
+        "ptr_len_overflow",
+        "out_of_bounds",
+        "capability_escape",
+        "path_traversal",
+        "null_byte_capability",
+        "cap_string_too_large",
+        "excessive_alloc",
+        "cpu_metered_loop",
+        "non_cooperative_loop",
+        "excessive_memory",
+        "memory_grow_probe",
+    ]
+    .iter()
+    .filter_map(|name| find_case(name))
+    .collect()
+}
+
 fn cases_by_category(categories: &[&str]) -> Vec<GuestCase> {
     all_cases()
         .into_iter()
@@ -343,6 +370,7 @@ fn case(
     control: &'static str,
     wat: &'static str,
 ) -> GuestCase {
+    let intel = threat_intel(name, category);
     GuestCase {
         name: name.into(),
         description: description.into(),
@@ -351,7 +379,122 @@ fn case(
         category: category.into(),
         severity: severity.into(),
         control: control.into(),
+        stage: intel.stage.into(),
+        ttp: intel.ttp.into(),
+        detection: intel.detection.into(),
         source_path: format!("guests/{name}.wat"),
         source: GuestSource::Wat(wat.into()),
+    }
+}
+
+struct ThreatIntel {
+    stage: &'static str,
+    ttp: &'static str,
+    detection: &'static str,
+}
+
+fn threat_intel(name: &str, category: &str) -> ThreatIntel {
+    match name {
+        "good_packet" | "boundary_valid_packet" | "capability_allowed" => ThreatIntel {
+            stage: "baseline",
+            ttp: "positive-control",
+            detection: "valid traffic proves controls are precise, not blanket-deny",
+        },
+        "bad_version" => ThreatIntel {
+            stage: "supply-chain validation",
+            ttp: "abi-contract-drift",
+            detection: "unsupported guest ABI version is denied before payload parsing",
+        },
+        "bad_magic" | "truncated_header" | "zero_length_packet" => ThreatIntel {
+            stage: "payload validation",
+            ttp: "malformed-abi-message",
+            detection: "fixed packet header gates reject malformed guest-controlled ranges",
+        },
+        "body_len_mismatch" | "checksum_mismatch" => ThreatIntel {
+            stage: "payload integrity",
+            ttp: "schema-confusion",
+            detection: "nested packet length and checksum gates catch forged payload metadata",
+        },
+        "unaligned_packet" | "invalid_align_param" => ThreatIntel {
+            stage: "abi probing",
+            ttp: "misaligned-host-read",
+            detection: "alignment gates reject invalid structured reads before memory access",
+        },
+        "ptr_len_overflow" | "out_of_bounds" => ThreatIntel {
+            stage: "memory-boundary probing",
+            ttp: "guest-pointer-confusion",
+            detection: "checked arithmetic and MemoryView bounds gates deny unsafe ranges",
+        },
+        "memory_grow_probe" => ThreatIntel {
+            stage: "runtime state mutation",
+            ttp: "linear-memory-growth",
+            detection: "telemetry records memory growth and fresh MemoryView reacquisition",
+        },
+        "capability_escape" | "path_traversal" | "null_byte_capability" => ThreatIntel {
+            stage: "capability escalation",
+            ttp: "host-capability-abuse",
+            detection: "exact allow-list capability checks deny path escape attempts",
+        },
+        "invalid_utf8_path" => ThreatIntel {
+            stage: "capability escalation",
+            ttp: "string-decoder-confusion",
+            detection: "fallible UTF-8 decoding runs before capability policy decisions",
+        },
+        "cap_string_too_large" => ThreatIntel {
+            stage: "capability escalation",
+            ttp: "oversized-string-copy",
+            detection: "string length cap denies copy before host allocation",
+        },
+        "excessive_alloc" => ThreatIntel {
+            stage: "resource pressure",
+            ttp: "host-allocation-pressure",
+            detection: "allocation cap denies request before Vec reserve",
+        },
+        "cpu_metered_loop" => ThreatIntel {
+            stage: "resource pressure",
+            ttp: "cooperative-cpu-exhaustion",
+            detection: "host.tick fuel records guest progress and denies after budget exhaustion",
+        },
+        "non_cooperative_loop" => ThreatIntel {
+            stage: "containment validation",
+            ttp: "unmetered-cpu-loop",
+            detection: "static audit blocks in-process execution; supervisor can enforce timeout",
+        },
+        "excessive_memory" => ThreatIntel {
+            stage: "containment validation",
+            ttp: "memory-declaration-abuse",
+            detection: "module audit rejects over-large memory before instantiation",
+        },
+        _ => default_threat_intel(category),
+    }
+}
+
+fn default_threat_intel(category: &str) -> ThreatIntel {
+    match category {
+        "abi" => ThreatIntel {
+            stage: "abi probing",
+            ttp: "guest-host-contract-abuse",
+            detection: "ABI gates reject malformed import arguments before host work",
+        },
+        "capability" => ThreatIntel {
+            stage: "capability escalation",
+            ttp: "host-capability-abuse",
+            detection: "capability policy denies ungranted host-side authority",
+        },
+        "resource" => ThreatIntel {
+            stage: "resource pressure",
+            ttp: "sandbox-resource-exhaustion",
+            detection: "resource gates deny CPU, memory, or allocation abuse",
+        },
+        "memory" => ThreatIntel {
+            stage: "memory-boundary probing",
+            ttp: "guest-pointer-confusion",
+            detection: "memory gates deny unsafe linear-memory access",
+        },
+        _ => ThreatIntel {
+            stage: "host-boundary validation",
+            ttp: "host-import-abuse",
+            detection: "host import telemetry records the boundary decision",
+        },
     }
 }

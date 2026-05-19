@@ -64,6 +64,7 @@ fn parse_positive_usize(value: &str, flag: &str) -> usize {
 pub enum Profile {
     All,
     Interview,
+    Campaign,
     Abi,
     Capability,
     Resource,
@@ -75,6 +76,7 @@ impl Profile {
         match value {
             "all" => Some(Self::All),
             "interview" => Some(Self::Interview),
+            "campaign" | "adversary" | "apt" => Some(Self::Campaign),
             "abi" => Some(Self::Abi),
             "capability" | "capabilities" | "caps" => Some(Self::Capability),
             "resource" | "resources" | "dos" => Some(Self::Resource),
@@ -87,6 +89,7 @@ impl Profile {
         match self {
             Self::All => "all",
             Self::Interview => "interview",
+            Self::Campaign => "campaign",
             Self::Abi => "abi",
             Self::Capability => "capability",
             Self::Resource => "resource",
@@ -178,7 +181,7 @@ impl Config {
                         Some(profile) => profile,
                         None => {
                             eprintln!(
-                                "Unsupported profile '{value}'. Use all, interview, abi, capability, resource, memory."
+                                "Unsupported profile '{value}'. Use all, interview, campaign, abi, capability, resource, memory."
                             );
                             std::process::exit(2);
                         }
@@ -283,6 +286,10 @@ impl Config {
                     interview = true;
                     profile = Profile::Interview;
                 }
+                "--campaign" | "--adversary" => {
+                    interview = true;
+                    profile = Profile::Campaign;
+                }
                 "--menu" => menu = true,
                 "--no-color" => no_color = true,
                 "--summary-only" => summary_only = true,
@@ -299,14 +306,17 @@ impl Config {
                     println!("  --scenario NAME     alias for --case");
                     println!("  --corpus DIR        load external .wat/.wasm corpus directory");
                     println!(
-                        "  --menu              interactive security console with session history"
+                        "  --menu              interactive security console with session history and charts"
                     );
                     println!("  --tui               live terminal security cockpit");
                     println!("  --live              alias for --tui");
                     println!("  --tui-delay-ms N    frame delay for --tui, default 120");
                     println!("  --interview         curated attack -> gate -> result flow");
                     println!(
-                        "  --profile NAME      all, interview, abi, capability, resource, memory"
+                        "  --profile NAME      all, interview, campaign, abi, capability, resource, memory"
+                    );
+                    println!(
+                        "  --campaign          defensive adversary-emulation campaign profile"
                     );
                     println!("  --emit-wasm-dir D   compile WAT guests to D/*.wasm and exit");
                     println!("  --repeat N          repeat selected cases, default 1");

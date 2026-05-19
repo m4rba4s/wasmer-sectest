@@ -1,4 +1,4 @@
-.PHONY: help build test ci run menu tui interview policy corpus stress list singlepass supervisor matrix emit-wasm report-json report-md report-sarif report-interview
+.PHONY: help build test ci run menu tui interview campaign policy corpus stress list singlepass supervisor matrix emit-wasm report-json report-md report-sarif report-interview report-campaign
 
 help:
 	@printf '%s\n' \
@@ -7,9 +7,10 @@ help:
 	  '  test              cargo test' \
 	  '  ci                local CI parity checks' \
 	  '  run               run full corpus' \
-	  '  menu              interactive security console with session history' \
+	  '  menu              interactive security console with session history and charts' \
 	  '  tui               live interview cockpit' \
 	  '  interview         non-animated interview flow' \
+	  '  campaign          defensive adversary-emulation campaign' \
 	  '  policy            run interview flow with policy.example.toml' \
 	  '  corpus            run example external corpus' \
 	  '  stress            repeat full corpus 1000 times' \
@@ -21,7 +22,8 @@ help:
 	  '  report-md         write ABI Markdown report' \
 	  '  report-json       write resource JSON report' \
 	  '  report-sarif      write CI-native SARIF report' \
-	  '  report-interview  write curated interview Markdown report'
+	  '  report-interview  write curated interview Markdown report' \
+	  '  report-campaign   write adversary-emulation Markdown report'
 
 build:
 	cargo build --release
@@ -37,6 +39,7 @@ ci:
 	cargo run --release -- --case non_cooperative_loop --isolate process --timeout-ms 100 --no-color
 	cargo run --release -- --policy policy.example.toml --profile all --summary-only --no-color
 	cargo run --release -- --corpus examples/external-corpus --no-color
+	cargo run --release -- --campaign --summary-only --no-color
 	cargo run --release -- --profile all --format sarif --report target/wasmer-harness.sarif
 
 run:
@@ -50,6 +53,9 @@ tui:
 
 interview:
 	cargo run --release -- --interview --no-color
+
+campaign:
+	cargo run --release -- --campaign --no-color
 
 policy:
 	cargo run --release -- --policy policy.example.toml --interview --no-color
@@ -86,3 +92,6 @@ report-sarif:
 
 report-interview:
 	cargo run --release -- --profile interview --format markdown --report target/interview-report.md
+
+report-campaign:
+	cargo run --release -- --profile campaign --format markdown --report target/adversary-campaign.md

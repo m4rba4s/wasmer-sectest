@@ -8,10 +8,12 @@ Interactive security console:
 cargo run --release -- --menu
 ```
 
-Use the numbered choices, press Enter to return to the menu after a run, and
-type `q` when the demo is finished. The console records menu runs in
+Use the numbered choices or aliases such as `t`, `i`, `ops`, `c`, `e`, and `l`.
+Invalid input stays in the menu with a notice instead of exiting. Press Enter to
+return to the menu after a run, and type `q` when the demo is finished. The console records menu runs in
 `target/security-sessions/`, can replay recent session evidence, explain a
-single boundary case, and export `target/demo-bundle/` for interview material.
+single boundary case, open a charts dashboard, and export `target/demo-bundle/`
+for interview material.
 
 ```bash
 ./run-tui.sh
@@ -23,10 +25,17 @@ Fallback without animation:
 cargo run --release -- --interview --no-color
 ```
 
+Defensive adversary-emulation campaign:
+
+```bash
+cargo run --release -- --campaign --no-color
+```
+
 Evidence artifact:
 
 ```bash
 cargo run --release -- --profile interview --format markdown --report target/interview-report.md
+cargo run --release -- --profile campaign --format markdown --report target/adversary-campaign.md
 cargo run --release -- --profile all --format sarif --report target/wasmer-harness.sarif
 ```
 
@@ -53,7 +62,7 @@ cargo run --release -- --corpus examples/external-corpus --no-color
 This is a Wasmer host-import security harness. It treats a WebAssembly guest as
 malicious input and validates host-side ABI boundaries before any privileged
 host action happens. The terminal UI is the live presentation layer over the
-same telemetry that powers text, Markdown, and JSON reports.
+same telemetry that powers text, Markdown, JSON, and SARIF reports.
 
 Short pitch:
 
@@ -61,6 +70,13 @@ Short pitch:
 > The guest is untrusted, but the import implementation is my code, so I built a
 > harness that attacks that boundary and records exactly which gate stopped each
 > case.
+
+APT-style pitch, kept defensive:
+
+> I also added an adversary-emulation profile. It turns the corpus into a
+> safe campaign chain: ABI contract drift, payload integrity abuse, guest
+> pointer confusion, capability escalation, resource pressure, and containment
+> validation. Every stage maps to a defensive control and a detection signal.
 
 ## Compilation Explanation
 
@@ -95,6 +111,18 @@ External corpus mode loads `.wat` and `.wasm` files from a directory. A
 `corpus.toml` manifest can attach expected return codes and case metadata, so the
 same runner can be used for curated demos and CI-style regression corpora.
 
+The campaign mode is just another curated profile over the same deterministic
+runner. It is useful when the interviewer wants threat-informed engineering
+rather than isolated unit-style cases:
+
+```bash
+cargo run --release -- --campaign --no-color
+```
+
+It intentionally avoids persistence, stealth, credential access, exfiltration,
+or real target interaction. The point is to demonstrate defensive sandbox
+controls, not to ship an offensive framework.
+
 ## Live Flow
 
 1. `good_packet`: positive control. A valid packet crosses the boundary.
@@ -128,6 +156,8 @@ same runner can be used for curated demos and CI-style regression corpora.
   `require_tick_import`, or supervised process isolation.
 - The corpus is intentionally local and deterministic so it can be rerun during
   an interview.
+- The adversary-emulation profile uses APT-style language only to organize
+  defensive controls and detection evidence.
 
 ## Tech Lead Angle
 
@@ -141,6 +171,8 @@ same runner can be used for curated demos and CI-style regression corpora.
   failures.
 - SARIF stays clean when the expected hostile corpus passes; it creates a
   CI/security-dashboard alert only when a control regresses.
+- Campaign reports include stage, TTP, detection, and control fields that make
+  the output easier to discuss with security leads.
 - Remaining expansion areas are richer external-corpus metadata, runtime
   metering as another defense layer, WASI capability cases, and CI across
   Wasmer crate versions.

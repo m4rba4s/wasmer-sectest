@@ -16,7 +16,9 @@ The repository is already structured like a small security tool:
   timeout/kill containment and `ERR_TIMEOUT` evidence;
 - ABI: low-level range and packet validation in `src/abi.rs`;
 - evidence: import telemetry and memory snapshots in `src/telemetry.rs`;
-- outputs: text, Markdown, JSON, SARIF, and TUI views;
+- outputs: text, Markdown, JSON, SARIF, campaign, and TUI views;
+- adversary emulation: curated campaign profile with stage, TTP, detection, and
+  control metadata for each case;
 - CI: format, unit tests, release corpus execution, policy mode, reports, and
   Singlepass backend smoke coverage;
 - regression test: the whole hostile corpus must match expected results.
@@ -53,7 +55,14 @@ The repository is already structured like a small security tool:
    with external corpus remediation text, tags, and stable rule help URIs so
    findings can show up cleanly in GitHub code scanning or security dashboards.
 
-4. Runtime CPU metering
+4. Threat-informed campaign mode
+
+   `--campaign` now runs a safe adversary-emulation chain over the same Wasmer
+   harness. It should stay defensive: no persistence, stealth, credential
+   access, exfiltration, or real target interaction. The next step is to allow
+   external corpus manifests to provide stage, TTP, and detection fields.
+
+5. Runtime CPU metering
 
    The current `tick` import demonstrates cooperative fuel, the static audit
    fixture proves the runner will not execute a known unmetered infinite loop
@@ -61,12 +70,12 @@ The repository is already structured like a small security tool:
    production tool should also exercise Wasmer metering as a second line of
    defense.
 
-5. WASI capability scenarios
+6. WASI capability scenarios
 
    Add cases around preopened directories, inherited environment variables,
    stdio, clock/random access, and network-facing host functions.
 
-6. Version/backend matrix
+7. Version/backend matrix
 
    CI now runs the core harness and Singlepass backend. Keep the local CLI
    matrix as a convenience, and add a pinned Wasmer-version matrix when the
@@ -77,5 +86,6 @@ The repository is already structured like a small security tool:
 This is a credible internal security harness because it is deterministic,
 produces evidence artifacts, has a clear threat model, refuses unsafe static
 fixtures before execution, and keeps host-import hardening separate from
-presentation code. It can also run external corpora without recompiling the
-harness.
+presentation code. The campaign profile adds a threat-informed story for
+security leads without turning the project into an offensive tool. It can also
+run external corpora without recompiling the harness.
