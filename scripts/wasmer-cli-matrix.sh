@@ -9,6 +9,11 @@ mkdir -p "$out_dir" "$matrix_dir"
 
 cargo run --quiet --offline -- --emit-wasm-dir "$out_dir" >/dev/null
 
+if ! command -v wasmer >/dev/null 2>&1; then
+  printf 'wasmer cli not installed; skipping optional matrix\n' >&2
+  exit 0
+fi
+
 printf 'backend,case,status,artifact\n'
 for backend in cranelift singlepass llvm; do
   for wasm in "$out_dir"/*.wasm; do

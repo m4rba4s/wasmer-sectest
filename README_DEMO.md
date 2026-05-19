@@ -10,6 +10,9 @@ This is intentionally more than a slide demo: the TUI is only a presentation
 layer over the same runner, policy, ABI checks, telemetry, and report generation
 used by the CLI.
 
+Continuous integration runs the harness on Ubuntu and macOS, plus Debian and
+Arch Linux containers for extra portability coverage.
+
 ## Why This Exists
 
 Wasmer gives the host a WebAssembly sandbox boundary, but a powerful or careless
