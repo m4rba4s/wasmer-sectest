@@ -3,20 +3,27 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: install.sh [--source-dir DIR] [--install-dir DIR] [--check]
+Usage: install.sh [--source-dir DIR] [--install-dir DIR] [--repo-url URL] [--ref REF] [--check]
 
 Options:
-  --source-dir DIR   repository root to build from (default: current directory)
+  --source-dir DIR   repository root to build from
   --install-dir DIR  install destination for the release binary
                      (default: ~/.local/bin)
+  --repo-url URL     git repository to clone when --source-dir is not set
+                     (default: https://github.com/m4rba4s/wasmer-sectest.git)
+  --ref REF          git ref to clone when --source-dir is not set
+                     (default: main)
   --check            run build and test checks without installing
   -h, --help         show this help
 EOF
 }
 
-source_dir="$(pwd)"
+source_dir=""
 install_dir="${HOME}/.local/bin"
+repo_url="https://github.com/m4rba4s/wasmer-sectest.git"
+ref="main"
 check_only=false
+cleanup_dir=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -26,6 +33,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --install-dir)
       install_dir="${2:-}"
+      shift 2
+      ;;
+    --repo-url)
+      repo_url="${2:-}"
+      shift 2
+      ;;
+    --ref)
+      ref="${2:-}"
       shift 2
       ;;
     --check)
@@ -44,9 +59,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -f "$source_dir/Cargo.toml" ]]; then
-  echo "source-dir does not look like the repository root: $source_dir" >&2
-  exit 2
+if [[ -n "$source_dir" ]]; then
+  if [[ ! -f "$source_dir/Cargo.toml" ]]; then
+    echo "source-dir does not look like the repository root: $source_dir" >&2
+    exit 2
+  fi
+else
+  cleanup_dir="$(mktemp -d)"
+  trap 'rm -rf "$cleanup_dir"' EXIT
+  source_dir="$cleanup_dir/wasmer-sectest"
+  git clone --depth 1 --branch "$ref" "$repo_url" "$source_dir"
 fi
 
 cd "$source_dir"
