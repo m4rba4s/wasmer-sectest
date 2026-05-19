@@ -41,7 +41,10 @@ The goal is to demonstrate and test host-side controls:
 Interactive security console:
 
 ```bash
-cargo run --release -- --menu
+git clone https://github.com/m4rba4s/wasmer-sectest.git
+cd wasmer-sectest/
+make menu
+
 ```
 
 Inside the menu, use a number or alias such as `t`, `i`, `ops`, `c`, `e`, or `l`.
@@ -61,12 +64,6 @@ Equivalent direct command:
 
 ```bash
 cargo run --release -- --interview --tui
-```
-
-Install smoke test through `curl` from a local checkout:
-
-```bash
-curl -fsSL file://$PWD/scripts/install.sh | bash -s -- --check --source-dir "$PWD"
 ```
 
 Install from GitHub without cloning first:
