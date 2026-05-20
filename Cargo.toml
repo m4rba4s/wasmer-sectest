@@ -4,12 +4,14 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+async-trait = "0.1"
 thiserror = "2"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time", "io-util"] }
 wasmer = { version = "=6.1.0", features = ["sys", "cranelift", "singlepass"] }
 wasmer-wasix = { version = "0.601.0", default-features = false, features = ["sys-minimal"] }
 wat = { version = "=1.249.0" }
 virtual-fs = { version = "0.601.0", default-features = false }
+virtual-mio = "0.601.0"
 
 [lib]
 name = "wasmer_demo"

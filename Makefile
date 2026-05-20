@@ -1,4 +1,4 @@
-.PHONY: help build test ci run menu tui interview campaign policy corpus stress list singlepass supervisor matrix emit-wasm report-json report-md report-sarif report-interview report-campaign install-check install-local
+.PHONY: help build test ci run menu tui interview campaign wasi-network-demo policy corpus stress list singlepass supervisor matrix emit-wasm report-json report-md report-sarif report-interview report-campaign install-check install-local
 
 help:
 	@printf '%s\n' \
@@ -11,6 +11,7 @@ help:
 	  '  tui               live interview cockpit' \
 	  '  interview         non-animated interview flow' \
 	  '  campaign          defensive adversary-emulation campaign' \
+	  '  wasi-network-demo run WASI network interception honeypot demo' \
 	  '  policy            run interview flow with policy.example.toml' \
 	  '  corpus            run example external corpus' \
 	  '  stress            repeat full corpus 1000 times' \
@@ -58,6 +59,9 @@ interview:
 
 campaign:
 	cargo run --release -- --campaign --no-color
+
+wasi-network-demo:
+	WASMER_SECTEST_SHOW_DEMO=1 cargo test --test wasi_network_interception -- --nocapture
 
 policy:
 	cargo run --release -- --policy policy.example.toml --interview --no-color

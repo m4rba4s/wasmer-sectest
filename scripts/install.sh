@@ -138,6 +138,10 @@ ensure_rust_toolchain() {
   if ! rustup component list --installed | grep -q '^clippy-'; then
     rustup component add clippy >/dev/null
   fi
+
+  if ! rustup target list --installed | grep -q '^wasm32-wasip1$'; then
+    rustup target add wasm32-wasip1 >/dev/null
+  fi
 }
 
 source_dir=""

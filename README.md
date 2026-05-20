@@ -64,6 +64,26 @@ Equivalent direct command:
 
 ```bash
 cargo run --release -- --interview --tui
+```
+
+## WASI Network Honeypot Demo
+
+The network interception demo compiles a tiny Rust WASI guest, runs it inside
+the Wasmer host, and proves that a public HTTP request is handled entirely by
+the host sandbox. The guest asks for
+`jsonplaceholder.typicode.com:80/users/1`; the host resolver returns a
+synthetic `203.0.113.0/24` address, captures the request payload, blocks real
+egress, and injects a deterministic HTTP 200 JSON response.
+
+```bash
+make wasi-network-demo
+```
+
+The integration test asserts both sides of the boundary: host telemetry must
+contain resolve/connect/payload/mock-response events, and guest stdout must
+contain the mocked JSON body. Fresh-machine installs provision the Rust
+`wasm32-wasip1` target automatically.
+
 ## Policy File
 
 By default the harness uses a strict built-in policy:
@@ -91,4 +111,3 @@ Run it with:
 ```bash
 cargo run --release -- --policy policy.example.toml --profile all
 ```
-
