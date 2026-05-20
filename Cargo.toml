@@ -4,9 +4,20 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "time"] }
 wasmer = { version = "=6.1.0", features = ["sys", "cranelift", "singlepass"] }
+wasmer-wasix = { version = "0.601.0", default-features = false, features = ["sys-minimal"] }
 wat = { version = "=1.249.0" }
+virtual-fs = { version = "0.601.0", default-features = false }
 
 [lib]
 name = "wasmer_demo"
 path = "src/lib.rs"
+
+[dev-dependencies]
+criterion = "0.7"
+
+[[bench]]
+name = "runtime"
+harness = false

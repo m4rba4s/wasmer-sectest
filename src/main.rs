@@ -3,6 +3,9 @@ use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::time::Duration;
 
+use tokio::task;
+
+use wasmer_demo::async_runner::collect_reports_async;
 use wasmer_demo::config::{Config, IsolationMode, OutputFormat};
 use wasmer_demo::corpus::load_corpus;
 use wasmer_demo::guests::{
@@ -20,16 +23,40 @@ use wasmer_demo::tui::{TuiOptions, run_security_dashboard};
 use wasmer_demo::visual;
 
 fn main() {
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            eprintln!("failed to start tokio runtime: {err}");
+            std::process::exit(1);
+        }
+    };
+
+    let exit_code = runtime.block_on(async_main());
+    std::process::exit(exit_code);
+}
+
+async fn async_main() -> i32 {
     let config = Config::from_args();
     let policy = load_policy(&config);
     if let Some(name) = &config.worker_case {
-        run_worker(&config, policy, name);
-        return;
+        let config = config.clone();
+        let name = name.clone();
+        return run_blocking(move || {
+            run_worker(&config, policy, &name);
+            0
+        })
+        .await;
     }
 
     if config.menu {
-        run_interactive_menu(&config, policy);
-        return;
+        return run_blocking(move || {
+            run_interactive_menu(&config, policy);
+            0
+        })
+        .await;
     }
 
     let interview_output = config.interview;
@@ -42,7 +69,7 @@ fn main() {
                 eprintln!("unknown case '{name}'");
                 eprintln!("available cases:");
                 print_case_list(&all_cases());
-                std::process::exit(2);
+                return 2;
             }
         }
     } else {
@@ -51,39 +78,59 @@ fn main() {
 
     if config.list {
         print_case_list(&cases);
-        return;
+        return 0;
     }
 
     if let Some(dir) = &config.emit_wasm_dir {
         emit_wasm(&cases, dir);
-        return;
+        return 0;
     }
 
     if config.tui {
         if config.isolation == IsolationMode::Process {
             eprintln!("--tui does not support --isolate process; use CLI/report mode instead");
-            std::process::exit(2);
+            return 2;
         }
-        let reports = run_security_dashboard(
-            &cases,
-            config.backend,
-            policy.clone(),
-            TuiOptions {
-                delay: Duration::from_millis(config.tui_delay_ms),
-                color: !config.no_color,
-            },
-        );
+        let tui_cases = cases.clone();
+        let tui_backend = config.backend;
+        let tui_policy = policy.clone();
+        let tui_options = TuiOptions {
+            delay: Duration::from_millis(config.tui_delay_ms),
+            color: !config.no_color,
+        };
+        let reports = match task::spawn_blocking(move || {
+            run_security_dashboard(&tui_cases, tui_backend, tui_policy, tui_options)
+        })
+        .await
+        {
+            Ok(reports) => reports,
+            Err(err) => {
+                eprintln!("tui worker failed: {err}");
+                return 1;
+            }
+        };
         if reports.iter().any(|report| !report.passed()) {
-            std::process::exit(1);
+            return 1;
         }
-        return;
+        return 0;
     }
 
-    let reports = collect_reports(&config, &cases, &policy);
+    let reports = collect_reports_async(&config, &cases, &policy).await;
 
     emit_report(&config, &reports, &policy, interview_output);
     if reports.iter().any(|report| !report.passed()) {
-        std::process::exit(1);
+        return 1;
+    }
+    0
+}
+
+async fn run_blocking(run: impl FnOnce() -> i32 + Send + 'static) -> i32 {
+    match task::spawn_blocking(run).await {
+        Ok(code) => code,
+        Err(err) => {
+            eprintln!("blocking task failed: {err}");
+            1
+        }
     }
 }
 
@@ -119,10 +166,13 @@ fn run_selected_case(
 
 fn run_worker(config: &Config, policy: Policy, name: &str) {
     let case = if let Some(dir) = &config.corpus_dir {
-        choose_external_cases(dir, Some(name))
-            .into_iter()
-            .next()
-            .expect("selected external case exists")
+        match choose_external_cases(dir, Some(name)).into_iter().next() {
+            Some(case) => case,
+            None => {
+                eprintln!("unknown worker case '{name}'");
+                std::process::exit(2);
+            }
+        }
     } else {
         match find_case(name) {
             Some(case) => case,

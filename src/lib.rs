@@ -1,8 +1,11 @@
 pub mod abi;
 pub mod ansi;
+pub mod async_runner;
 pub mod config;
 pub mod corpus;
+pub mod error;
 pub mod guests;
+pub mod memory;
 pub mod policy;
 pub mod report;
 pub mod runner;
@@ -11,3 +14,4 @@ pub mod supervisor;
 pub mod telemetry;
 pub mod tui;
 pub mod visual;
+pub mod wasi_sandbox;

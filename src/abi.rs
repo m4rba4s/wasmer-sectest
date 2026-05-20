@@ -217,19 +217,39 @@ pub fn parse_packet(bytes: &[u8]) -> Result<Packet, AbiError> {
         return Err(AbiError::PacketTooShort { len: bytes.len() });
     }
 
-    let magic = u32::from_le_bytes(bytes[0..4].try_into().expect("slice length checked"));
+    let magic = u32::from_le_bytes(
+        bytes[0..4]
+            .try_into()
+            .map_err(|_| AbiError::PacketTooShort { len: bytes.len() })?,
+    );
     if magic != PACKET_MAGIC {
         return Err(AbiError::BadMagic(magic));
     }
 
-    let version = u16::from_le_bytes(bytes[4..6].try_into().expect("slice length checked"));
+    let version = u16::from_le_bytes(
+        bytes[4..6]
+            .try_into()
+            .map_err(|_| AbiError::PacketTooShort { len: bytes.len() })?,
+    );
     if version != 1 {
         return Err(AbiError::BadVersion(version));
     }
 
-    let flags = u16::from_le_bytes(bytes[6..8].try_into().expect("slice length checked"));
-    let body_len = u32::from_le_bytes(bytes[8..12].try_into().expect("slice length checked"));
-    let checksum = u32::from_le_bytes(bytes[12..16].try_into().expect("slice length checked"));
+    let flags = u16::from_le_bytes(
+        bytes[6..8]
+            .try_into()
+            .map_err(|_| AbiError::PacketTooShort { len: bytes.len() })?,
+    );
+    let body_len = u32::from_le_bytes(
+        bytes[8..12]
+            .try_into()
+            .map_err(|_| AbiError::PacketTooShort { len: bytes.len() })?,
+    );
+    let checksum = u32::from_le_bytes(
+        bytes[12..16]
+            .try_into()
+            .map_err(|_| AbiError::PacketTooShort { len: bytes.len() })?,
+    );
     let body = &bytes[PACKET_HEADER_LEN..];
 
     if body.len() != body_len as usize {

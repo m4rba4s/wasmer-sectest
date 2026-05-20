@@ -6,11 +6,14 @@ use wasmer::{
     sys::{Cranelift, Singlepass},
 };
 
-use crate::abi::{self, AbiError, GuestRange};
+use crate::abi::{self, AbiError};
 use crate::config::Backend;
 use crate::guests::{CaseKind, GuestCase};
+use crate::memory::{self, GuestBytes, GuestBytesMut};
 use crate::policy::Policy;
 use crate::telemetry::{Gate, ImportEvent, MemorySnapshot, Telemetry};
+
+const HOST_WRITE_MARKER: &[u8; 4] = b"WSEC";
 
 /// Security audit of the Wasm module before instantiation.
 /// This is a "Static Analysis" gate.
@@ -116,9 +119,6 @@ impl HostState {
     }
 }
 
-type GuestReadOk = (Vec<u8>, GuestRange, u64, Vec<Gate>);
-type GuestReadErr = (AbiError, Option<u64>, Vec<Gate>);
-
 pub fn run_case(case: &GuestCase, backend: Backend, policy: Policy) -> CaseReport {
     run_case_with_static_mode(case, backend, policy, false)
 }
@@ -207,6 +207,7 @@ fn run_case_inner(
             "accept_packet" => Function::new_typed_with_env(&mut store, &env, host_accept_packet),
             "read_cap" => Function::new_typed_with_env(&mut store, &env, host_read_cap),
             "alloc_cap" => Function::new_typed_with_env(&mut store, &env, host_alloc_cap),
+            "write_marker" => Function::new_typed_with_env(&mut store, &env, host_write_marker),
             "tick" => Function::new_typed_with_env(&mut store, &env, host_tick),
         },
     };
@@ -430,43 +431,16 @@ fn snapshot_memory(memory: &Memory, store: &impl AsStoreRef) -> MemorySnapshot {
 fn host_accept_packet(mut env: FunctionEnvMut<HostState>, ptr: u32, len: u32, align: u32) -> i32 {
     let start = Instant::now();
     let (state, store) = env.data_and_store_mut();
-    let (result, memory_size, gates, detail) = match read_guest_bytes(
-        state,
+    let (result, memory_size, gates, detail) = match memory::with_guest_bytes(
+        state.memory.as_ref(),
         &store,
         ptr,
         len,
         align,
         state.policy.max_packet_len,
+        validate_packet_from_guest,
     ) {
-        Ok((bytes, range, memory_size, mut gates)) => match abi::parse_packet(&bytes) {
-            Ok(packet) => {
-                gates.push(Gate::pass("packet.header"));
-                gates.push(Gate::pass("packet.checksum"));
-                (
-                    abi::OK,
-                    Some(memory_size),
-                    gates,
-                    format!(
-                        "packet ptr=0x{:08x} end=0x{:08x} version={} flags=0x{:04x} body_len={} checksum=0x{:08x}",
-                        range.ptr,
-                        range.end,
-                        packet.version,
-                        packet.flags,
-                        packet.body_len,
-                        packet.checksum
-                    ),
-                )
-            }
-            Err(err) => {
-                gates.push(Gate::fail(err.gate()));
-                (
-                    err.code(),
-                    Some(memory_size),
-                    gates,
-                    format!("packet rejected: {err}"),
-                )
-            }
-        },
+        Ok(outcome) => outcome,
         Err((err, memory_size, gates)) => (
             err.code(),
             memory_size,
@@ -492,51 +466,23 @@ fn host_accept_packet(mut env: FunctionEnvMut<HostState>, ptr: u32, len: u32, al
 fn host_read_cap(mut env: FunctionEnvMut<HostState>, ptr: u32, len: u32) -> i32 {
     let start = Instant::now();
     let (state, store) = env.data_and_store_mut();
-    let (result, memory_size, gates, detail) =
-        match read_guest_bytes(state, &store, ptr, len, 1, state.policy.max_cap_string_len) {
-            Ok((bytes, range, memory_size, mut gates)) => match String::from_utf8(bytes) {
-                Ok(path) if state.policy.is_path_allowed(&path) => {
-                    gates.push(Gate::pass("utf8"));
-                    gates.push(Gate::pass("capability"));
-                    (
-                        abi::OK,
-                        Some(memory_size),
-                        gates,
-                        format!(
-                            "path capability allowed ptr=0x{:08x} end=0x{:08x} path={path}",
-                            range.ptr, range.end
-                        ),
-                    )
-                }
-                Ok(path) => {
-                    let err = AbiError::CapabilityDenied(path);
-                    gates.push(Gate::pass("utf8"));
-                    gates.push(Gate::fail(err.gate()));
-                    (
-                        err.code(),
-                        Some(memory_size),
-                        gates,
-                        format!("path rejected: {err}"),
-                    )
-                }
-                Err(_) => {
-                    let err = AbiError::InvalidUtf8;
-                    gates.push(Gate::fail(err.gate()));
-                    (
-                        err.code(),
-                        Some(memory_size),
-                        gates,
-                        format!("string rejected: {err}"),
-                    )
-                }
-            },
-            Err((err, memory_size, gates)) => (
-                err.code(),
-                memory_size,
-                gates,
-                format!("range rejected: {err}"),
-            ),
-        };
+    let (result, memory_size, gates, detail) = match memory::with_guest_bytes(
+        state.memory.as_ref(),
+        &store,
+        ptr,
+        len,
+        1,
+        state.policy.max_cap_string_len,
+        |guest| validate_capability_from_guest(guest, &state.policy),
+    ) {
+        Ok(outcome) => outcome,
+        Err((err, memory_size, gates)) => (
+            err.code(),
+            memory_size,
+            gates,
+            format!("range rejected: {err}"),
+        ),
+    };
 
     state.telemetry.push(ImportEvent {
         import: "host.read_cap",
@@ -550,6 +496,162 @@ fn host_read_cap(mut env: FunctionEnvMut<HostState>, ptr: u32, len: u32) -> i32 
         gates,
     });
     result
+}
+
+fn validate_packet_from_guest(
+    GuestBytes {
+        bytes,
+        range,
+        memory_size,
+        mut gates,
+    }: GuestBytes<'_>,
+) -> (i32, Option<u64>, Vec<Gate>, String) {
+    match abi::parse_packet(bytes) {
+        Ok(packet) => {
+            gates.push(Gate::pass("packet.header"));
+            gates.push(Gate::pass("packet.checksum"));
+            (
+                abi::OK,
+                Some(memory_size),
+                gates,
+                format!(
+                    "packet ptr=0x{:08x} end=0x{:08x} version={} flags=0x{:04x} body_len={} checksum=0x{:08x}",
+                    range.ptr,
+                    range.end,
+                    packet.version,
+                    packet.flags,
+                    packet.body_len,
+                    packet.checksum
+                ),
+            )
+        }
+        Err(err) => {
+            gates.push(Gate::fail(err.gate()));
+            (
+                err.code(),
+                Some(memory_size),
+                gates,
+                format!("packet rejected: {err}"),
+            )
+        }
+    }
+}
+
+fn validate_capability_from_guest(
+    GuestBytes {
+        bytes,
+        range,
+        memory_size,
+        mut gates,
+    }: GuestBytes<'_>,
+    policy: &Policy,
+) -> (i32, Option<u64>, Vec<Gate>, String) {
+    match std::str::from_utf8(bytes) {
+        Ok(path) if policy.is_path_allowed(path) => {
+            gates.push(Gate::pass("utf8"));
+            gates.push(Gate::pass("capability"));
+            (
+                abi::OK,
+                Some(memory_size),
+                gates,
+                format!(
+                    "path capability allowed ptr=0x{:08x} end=0x{:08x} path={path}",
+                    range.ptr, range.end
+                ),
+            )
+        }
+        Ok(path) => {
+            let err = AbiError::CapabilityDenied(path.to_owned());
+            gates.push(Gate::pass("utf8"));
+            gates.push(Gate::fail(err.gate()));
+            (
+                err.code(),
+                Some(memory_size),
+                gates,
+                format!("path rejected: {err}"),
+            )
+        }
+        Err(_) => {
+            let err = AbiError::InvalidUtf8;
+            gates.push(Gate::fail(err.gate()));
+            (
+                err.code(),
+                Some(memory_size),
+                gates,
+                format!("string rejected: {err}"),
+            )
+        }
+    }
+}
+
+fn host_write_marker(mut env: FunctionEnvMut<HostState>, ptr: u32, len: u32, align: u32) -> i32 {
+    let start = Instant::now();
+    let (state, store) = env.data_and_store_mut();
+    let (result, memory_size, gates, detail) = match memory::with_guest_bytes_mut(
+        state.memory.as_ref(),
+        &store,
+        ptr,
+        len,
+        align,
+        HOST_WRITE_MARKER.len() as u32,
+        write_marker_to_guest,
+    ) {
+        Ok(outcome) => outcome,
+        Err((err, memory_size, gates)) => (
+            err.code(),
+            memory_size,
+            gates,
+            format!("range rejected: {err}"),
+        ),
+    };
+
+    state.telemetry.push(ImportEvent {
+        import: "host.write_marker",
+        ptr: Some(ptr),
+        len: Some(len),
+        align: Some(align),
+        memory_size,
+        result_code: result,
+        detail,
+        elapsed_us: start.elapsed().as_micros(),
+        gates,
+    });
+    result
+}
+
+fn write_marker_to_guest(
+    GuestBytesMut {
+        bytes,
+        range,
+        memory_size,
+        mut gates,
+    }: GuestBytesMut<'_>,
+) -> (i32, Option<u64>, Vec<Gate>, String) {
+    if bytes.len() != HOST_WRITE_MARKER.len() {
+        gates.push(Gate::fail("marker.len"));
+        return (
+            abi::ERR_HEADER,
+            Some(memory_size),
+            gates,
+            format!(
+                "marker write rejected: len={} required={}",
+                bytes.len(),
+                HOST_WRITE_MARKER.len()
+            ),
+        );
+    }
+
+    bytes.copy_from_slice(HOST_WRITE_MARKER);
+    gates.push(Gate::pass("marker.write"));
+    (
+        abi::OK,
+        Some(memory_size),
+        gates,
+        format!(
+            "marker written directly into guest memory ptr=0x{:08x} end=0x{:08x}",
+            range.ptr, range.end
+        ),
+    )
 }
 
 fn host_alloc_cap(mut env: FunctionEnvMut<HostState>, requested: u32) -> i32 {
@@ -636,57 +738,6 @@ fn host_tick(mut env: FunctionEnvMut<HostState>) -> i32 {
 
 fn should_record_tick(tick: u32, result: i32) -> bool {
     result != abi::OK || tick <= 5 || tick.is_multiple_of(64)
-}
-
-fn read_guest_bytes(
-    state: &HostState,
-    store: &impl AsStoreRef,
-    ptr: u32,
-    len: u32,
-    align: u32,
-    max_len: u32,
-) -> Result<GuestReadOk, GuestReadErr> {
-    let Some(memory) = state.memory.as_ref() else {
-        let err = AbiError::MissingMemory;
-        return Err((err, None, vec![Gate::fail("memory.export")]));
-    };
-
-    let view = memory.view(store);
-    let memory_size = view.data_size();
-    let mut gates = Vec::with_capacity(5);
-    let range = match abi::checked_guest_range(ptr, len, align, memory_size, max_len) {
-        Ok(range) => {
-            gates.push(Gate::pass("max_len"));
-            gates.push(Gate::pass("alignment"));
-            gates.push(Gate::pass("checked_add"));
-            gates.push(Gate::pass("bounds"));
-            range
-        }
-        Err(err) => {
-            let failed_gate = err.gate();
-            if failed_gate != "max_len" {
-                gates.push(Gate::pass("max_len"));
-            }
-            if !matches!(failed_gate, "alignment" | "max_len") {
-                gates.push(Gate::pass("alignment"));
-            }
-            if !matches!(failed_gate, "checked_add" | "alignment" | "max_len") {
-                gates.push(Gate::pass("checked_add"));
-            }
-            gates.push(Gate::fail(failed_gate));
-            return Err((err, Some(memory_size), gates));
-        }
-    };
-
-    let mut bytes = vec![0u8; len as usize];
-    if let Err(err) = view.read(range.offset, &mut bytes) {
-        let err = AbiError::MemoryRead(err.to_string());
-        gates.push(Gate::fail(err.gate()));
-        return Err((err, Some(memory_size), gates));
-    }
-    gates.push(Gate::pass("memory.read"));
-
-    Ok((bytes, range, memory_size, gates))
 }
 
 #[cfg(test)]

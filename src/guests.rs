@@ -284,6 +284,16 @@ pub fn all_cases() -> Vec<GuestCase> {
             "drop stale MemoryView state and reacquire views after guest calls",
             include_str!("../guests/memory_grow_probe.wat"),
         ),
+        case(
+            "zero_copy_write_probe",
+            "host writes a marker directly into guest linear memory",
+            OK,
+            CaseKind::RunExport,
+            "memory",
+            "info",
+            "positive control: host writes through a validated guest pointer without an intermediate buffer",
+            include_str!("../guests/zero_copy_write_probe.wat"),
+        ),
     ]
 }
 
@@ -320,6 +330,7 @@ pub fn interview_cases() -> Vec<GuestCase> {
         "excessive_memory",
         "zero_length_packet",
         "memory_grow_probe",
+        "zero_copy_write_probe",
     ]
     .iter()
     .filter_map(|name| find_case(name))
@@ -343,6 +354,7 @@ pub fn campaign_cases() -> Vec<GuestCase> {
         "non_cooperative_loop",
         "excessive_memory",
         "memory_grow_probe",
+        "zero_copy_write_probe",
     ]
     .iter()
     .filter_map(|name| find_case(name))
@@ -429,6 +441,11 @@ fn threat_intel(name: &str, category: &str) -> ThreatIntel {
             stage: "runtime state mutation",
             ttp: "linear-memory-growth",
             detection: "telemetry records memory growth and fresh MemoryView reacquisition",
+        },
+        "zero_copy_write_probe" => ThreatIntel {
+            stage: "host-boundary validation",
+            ttp: "guest-pointer-output-buffer",
+            detection: "host writes are scoped to validated MemoryView ranges and logged as direct memory writes",
         },
         "capability_escape" | "path_traversal" | "null_byte_capability" => ThreatIntel {
             stage: "capability escalation",
