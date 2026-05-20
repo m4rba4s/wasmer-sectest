@@ -44,6 +44,9 @@ Interactive security console:
 git clone https://github.com/m4rba4s/wasmer-sectest.git
 cd wasmer-sectest/
 make menu
+make wasi-network-demo
+
+
 
 ```
 
