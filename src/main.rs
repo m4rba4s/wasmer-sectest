@@ -1153,7 +1153,7 @@ fn emit_wasm(cases: &[wasmer_demo::guests::GuestCase], dir: &str) {
             }
         };
         let path = dir.join(format!("{}.wasm", case.name));
-        if let Err(err) = std::fs::write(&path, wasm) {
+        if let Err(err) = std::fs::write(&path, wasm.as_ref()) {
             eprintln!("failed to write {}: {err}", path.display());
             std::process::exit(1);
         }

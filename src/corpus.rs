@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use crate::abi;
 use crate::guests::{CaseKind, GuestCase, GuestSource};
+
+const MAX_EXTERNAL_MODULE_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Default)]
 struct CaseMetadata {
@@ -168,13 +171,8 @@ fn load_case(path: &Path, rel: &str, meta: Option<CaseMetadata>) -> Result<Guest
             .to_string()
     });
     let source = match path.extension().and_then(|ext| ext.to_str()) {
-        Some("wat") => GuestSource::Wat(
-            fs::read_to_string(path)
-                .map_err(|err| format!("failed to read {}: {err}", path.display()))?,
-        ),
-        Some("wasm") => GuestSource::Wasm(
-            fs::read(path).map_err(|err| format!("failed to read {}: {err}", path.display()))?,
-        ),
+        Some("wat") => GuestSource::Wat(read_bounded_utf8(path)?),
+        Some("wasm") => GuestSource::Wasm(read_bounded_bytes(path)?),
         _ => return Err(format!("unsupported guest module {}", path.display())),
     };
     let category = meta.category.unwrap_or_else(|| "external".into());
@@ -214,6 +212,40 @@ fn relative_key(root: &Path, path: &Path) -> String {
 
 fn normalize_manifest_path(path: &str) -> String {
     path.trim_start_matches("./").replace('\\', "/")
+}
+
+fn read_bounded_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    let mut file =
+        fs::File::open(path).map_err(|err| format!("failed to open {}: {err}", path.display()))?;
+    let len = file
+        .metadata()
+        .map_err(|err| format!("failed to stat {}: {err}", path.display()))?
+        .len();
+    if len > MAX_EXTERNAL_MODULE_BYTES {
+        return Err(format!(
+            "{} is {len} bytes; max external module size is {MAX_EXTERNAL_MODULE_BYTES} bytes",
+            path.display()
+        ));
+    }
+    let capacity = usize::try_from(len)
+        .map_err(|_| format!("{} size does not fit host usize", path.display()))?;
+    let mut bytes = Vec::with_capacity(capacity);
+    file.by_ref()
+        .take(MAX_EXTERNAL_MODULE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| format!("failed to read {}: {err}", path.display()))?;
+    if bytes.len() as u64 > MAX_EXTERNAL_MODULE_BYTES {
+        return Err(format!(
+            "{} exceeded max external module size while reading",
+            path.display()
+        ));
+    }
+    Ok(bytes)
+}
+
+fn read_bounded_utf8(path: &Path) -> Result<String, String> {
+    String::from_utf8(read_bounded_bytes(path)?)
+        .map_err(|err| format!("{} is not valid UTF-8: {err}", path.display()))
 }
 
 fn parse_quoted_or_bare(value: &str, line_number: usize) -> Result<String, String> {
@@ -317,6 +349,22 @@ mod tests {
             assert!(report.passed(), "{} did not pass", report.name);
         }
 
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_oversized_external_modules_before_reading_body() {
+        let root = unique_temp_dir();
+        fs::create_dir_all(&root).expect("create temp corpus");
+        let oversized = root.join("oversized.wasm");
+        let file = fs::File::create(&oversized).expect("create oversized module");
+        file.set_len(MAX_EXTERNAL_MODULE_BYTES + 1)
+            .expect("size oversized module");
+
+        let err = load_corpus(root.to_str().expect("utf8 temp dir"))
+            .expect_err("oversized external module must be rejected");
+
+        assert!(err.contains("max external module size"), "{err}");
         let _ = fs::remove_dir_all(root);
     }
 

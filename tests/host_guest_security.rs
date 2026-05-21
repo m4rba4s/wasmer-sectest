@@ -144,6 +144,24 @@ async fn async_runner_completes_case_without_starving_tokio() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn async_runner_handles_large_repeat_without_unbounded_queue() {
+    let mut config = test_config();
+    config.repeat = 80;
+    let case = find_case("zero_copy_write_probe").expect("zero copy probe is registered");
+    let policy = Policy::default();
+
+    let reports = tokio::time::timeout(
+        Duration::from_secs(10),
+        collect_reports_async(&config, &[case], &policy),
+    )
+    .await
+    .expect("bounded async runner timed out");
+
+    assert_eq!(reports.len(), config.repeat);
+    assert!(reports.iter().all(|report| report.passed()), "{reports:#?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn wasi_honeypot_serves_decoy_passwd_to_real_wasm_module() {
     let fs = HoneypotFileSystem::new();
     let mut builder = fs

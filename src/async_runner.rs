@@ -9,6 +9,8 @@ use crate::runner::{CaseReport, run_case};
 use crate::supervisor::{SupervisorOptions, run_case_supervised};
 use crate::telemetry::{Gate, ImportEvent, MemorySnapshot, Telemetry};
 
+const MAX_IN_FLIGHT_CASES: usize = 64;
+
 #[derive(Debug, Clone)]
 struct CaseTask {
     index: usize,
@@ -27,7 +29,9 @@ pub async fn collect_reports_async(
     policy: &Policy,
 ) -> Vec<CaseReport> {
     let total = config.repeat.saturating_mul(cases.len());
+    let max_in_flight = max_in_flight_cases();
     let mut tasks = JoinSet::new();
+    let mut reports = Vec::with_capacity(total.min(max_in_flight));
     let mut index = 0usize;
 
     for _ in 0..config.repeat {
@@ -44,19 +48,44 @@ pub async fn collect_reports_async(
             };
             tasks.spawn(run_case_task(task));
             index += 1;
+            if tasks.len() >= max_in_flight {
+                join_next_report(&mut tasks, &mut reports).await;
+            }
         }
     }
 
-    let mut reports = Vec::with_capacity(total);
     while let Some(joined) = tasks.join_next().await {
-        match joined {
-            Ok(report) => reports.push(report),
-            Err(err) => reports.push(join_error_report(err)),
-        }
+        push_joined_report(&mut reports, joined);
     }
 
     reports.sort_by_key(|(index, _)| *index);
     reports.into_iter().map(|(_, report)| report).collect()
+}
+
+async fn join_next_report(
+    tasks: &mut JoinSet<(usize, CaseReport)>,
+    reports: &mut Vec<(usize, CaseReport)>,
+) {
+    if let Some(joined) = tasks.join_next().await {
+        push_joined_report(reports, joined);
+    }
+}
+
+fn push_joined_report(
+    reports: &mut Vec<(usize, CaseReport)>,
+    joined: Result<(usize, CaseReport), task::JoinError>,
+) {
+    match joined {
+        Ok(report) => reports.push(report),
+        Err(err) => reports.push(join_error_report(err)),
+    }
+}
+
+fn max_in_flight_cases() -> usize {
+    std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get().saturating_mul(2))
+        .unwrap_or(1)
+        .clamp(1, MAX_IN_FLIGHT_CASES)
 }
 
 async fn run_case_task(task: CaseTask) -> (usize, CaseReport) {
@@ -165,5 +194,18 @@ fn async_worker_error_report(case: &GuestCase, backend: Backend, err: String) ->
             }],
             ticks_seen: 0,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn async_scheduler_parallelism_is_hard_capped() {
+        let max = max_in_flight_cases();
+
+        assert!(max > 0);
+        assert!(max <= MAX_IN_FLIGHT_CASES);
     }
 }

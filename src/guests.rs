@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::abi::{
     ERR_ALIGN, ERR_ALLOC, ERR_BOUNDS, ERR_BUDGET, ERR_CAPABILITY, ERR_HEADER, ERR_TIMEOUT,
     ERR_TOO_LARGE, ERR_UTF8, OK,
@@ -18,10 +20,12 @@ pub enum GuestSource {
 }
 
 impl GuestSource {
-    pub fn wasm_bytes(&self) -> Result<Vec<u8>, String> {
+    pub fn wasm_bytes(&self) -> Result<Cow<'_, [u8]>, String> {
         match self {
-            Self::Wat(wat) => wat::parse_str(wat).map_err(|err| format!("WAT parse failed: {err}")),
-            Self::Wasm(bytes) => Ok(bytes.clone()),
+            Self::Wat(wat) => wat::parse_str(wat)
+                .map(Cow::Owned)
+                .map_err(|err| format!("WAT parse failed: {err}")),
+            Self::Wasm(bytes) => Ok(Cow::Borrowed(bytes.as_slice())),
         }
     }
 }
@@ -513,5 +517,22 @@ fn default_threat_intel(category: &str) -> ThreatIntel {
             ttp: "host-import-abuse",
             detection: "host import telemetry records the boundary decision",
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    #[test]
+    fn external_wasm_source_returns_borrowed_bytes() {
+        let source = GuestSource::Wasm(vec![0x00, 0x61, 0x73, 0x6d]);
+        let bytes = source
+            .wasm_bytes()
+            .expect("external wasm bytes are available");
+
+        assert!(matches!(bytes, Cow::Borrowed(_)));
+        assert_eq!(bytes.as_ref(), b"\0asm");
     }
 }

@@ -158,7 +158,7 @@ fn run_case_inner(
     };
 
     let compile_start = Instant::now();
-    let module = match Module::new(&store, &wasm) {
+    let module = match Module::new(&store, wasm.as_ref()) {
         Ok(module) => module,
         Err(err) => {
             return Err(Box::new(error_report(
