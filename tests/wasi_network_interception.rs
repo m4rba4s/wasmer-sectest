@@ -108,12 +108,13 @@ fn build_demo_guest(manifest_dir: &Path) -> PathBuf {
         .output()
         .expect("rustc is available to build demo guest");
 
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "failed to build {GUEST_SOURCE} for {TARGET}\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        "failed to build {GUEST_SOURCE} for {TARGET}\nstatus: {}\nstdout:\n{}\nstderr:\n{}\nhint: run `rustup target add {TARGET}` or use `make wasi-network-demo` so the target is provisioned first",
         output.status,
         String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
+        stderr,
     );
 
     wasm

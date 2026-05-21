@@ -82,7 +82,8 @@ make wasi-network-demo
 The integration test asserts both sides of the boundary: host telemetry must
 contain resolve/connect/payload/mock-response events, and guest stdout must
 contain the mocked JSON body. Fresh-machine installs provision the Rust
-`wasm32-wasip1` target automatically.
+`wasm32-wasip1` target automatically; the Makefile demo target also checks for
+that target before compiling the WASI guest.
 
 ## Portability
 

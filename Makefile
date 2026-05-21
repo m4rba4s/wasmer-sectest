@@ -1,4 +1,4 @@
-.PHONY: help build test ci run menu tui interview campaign wasi-network-demo policy corpus stress list singlepass supervisor matrix emit-wasm report-json report-md report-sarif report-interview report-campaign install-check install-local
+.PHONY: help build test ci run menu tui interview campaign wasi-target wasi-network-demo policy corpus stress list singlepass supervisor matrix emit-wasm report-json report-md report-sarif report-interview report-campaign install-check install-local
 
 help:
 	@printf '%s\n' \
@@ -11,6 +11,7 @@ help:
 	  '  tui               live interview cockpit' \
 	  '  interview         non-animated interview flow' \
 	  '  campaign          defensive adversary-emulation campaign' \
+	  '  wasi-target       ensure Rust can compile wasm32-wasip1 guests' \
 	  '  wasi-network-demo run WASI network interception honeypot demo' \
 	  '  policy            run interview flow with policy.example.toml' \
 	  '  corpus            run example external corpus' \
@@ -31,10 +32,10 @@ help:
 build:
 	cargo build --release
 
-test:
+test: wasi-target
 	cargo test
 
-ci:
+ci: wasi-target
 	cargo fmt --check
 	cargo test
 	cargo run --release -- --profile all --summary-only --no-color
@@ -60,7 +61,10 @@ interview:
 campaign:
 	cargo run --release -- --campaign --no-color
 
-wasi-network-demo:
+wasi-target:
+	bash scripts/ensure-wasi-target.sh
+
+wasi-network-demo: wasi-target
 	WASMER_SECTEST_SHOW_DEMO=1 cargo test --test wasi_network_interception -- --nocapture
 
 policy:
