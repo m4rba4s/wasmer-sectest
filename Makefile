@@ -1,3 +1,6 @@
+RUST_TOOLCHAIN ?= stable
+CARGO_TOOLCHAIN := cargo +$(RUST_TOOLCHAIN)
+
 .PHONY: help build test ci run menu tui interview campaign wasi-target wasi-network-demo policy corpus stress list singlepass supervisor matrix emit-wasm report-json report-md report-sarif report-interview report-campaign install-check install-local
 
 help:
@@ -33,18 +36,18 @@ build:
 	cargo build --release
 
 test: wasi-target
-	cargo test
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) $(CARGO_TOOLCHAIN) test
 
 ci: wasi-target
-	cargo fmt --check
-	cargo test
-	cargo run --release -- --profile all --summary-only --no-color
-	cargo run --release -- --profile all --backend singlepass --summary-only --no-color
-	cargo run --release -- --case non_cooperative_loop --isolate process --timeout-ms 100 --no-color
-	cargo run --release -- --policy policy.example.toml --profile all --summary-only --no-color
-	cargo run --release -- --corpus examples/external-corpus --no-color
-	cargo run --release -- --campaign --summary-only --no-color
-	cargo run --release -- --profile all --format sarif --report target/wasmer-harness.sarif
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) $(CARGO_TOOLCHAIN) fmt --check
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) $(CARGO_TOOLCHAIN) test
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) $(CARGO_TOOLCHAIN) run --release -- --profile all --summary-only --no-color
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) $(CARGO_TOOLCHAIN) run --release -- --profile all --backend singlepass --summary-only --no-color
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) $(CARGO_TOOLCHAIN) run --release -- --case non_cooperative_loop --isolate process --timeout-ms 100 --no-color
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) $(CARGO_TOOLCHAIN) run --release -- --policy policy.example.toml --profile all --summary-only --no-color
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) $(CARGO_TOOLCHAIN) run --release -- --corpus examples/external-corpus --no-color
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) $(CARGO_TOOLCHAIN) run --release -- --campaign --summary-only --no-color
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) $(CARGO_TOOLCHAIN) run --release -- --profile all --format sarif --report target/wasmer-harness.sarif
 
 run:
 	cargo run --release
@@ -62,10 +65,10 @@ campaign:
 	cargo run --release -- --campaign --no-color
 
 wasi-target:
-	bash scripts/ensure-wasi-target.sh
+	WASMER_SECTEST_RUST_TOOLCHAIN=$(RUST_TOOLCHAIN) bash scripts/ensure-wasi-target.sh
 
 wasi-network-demo: wasi-target
-	WASMER_SECTEST_SHOW_DEMO=1 cargo test --test wasi_network_interception -- --nocapture
+	RUSTUP_TOOLCHAIN=$(RUST_TOOLCHAIN) WASMER_SECTEST_SHOW_DEMO=1 $(CARGO_TOOLCHAIN) test --test wasi_network_interception -- --nocapture
 
 policy:
 	cargo run --release -- --policy policy.example.toml --interview --no-color

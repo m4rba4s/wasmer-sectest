@@ -111,7 +111,7 @@ fn build_demo_guest(manifest_dir: &Path) -> PathBuf {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "failed to build {GUEST_SOURCE} for {TARGET}\nstatus: {}\nstdout:\n{}\nstderr:\n{}\nhint: run `rustup target add {TARGET}` or use `make wasi-network-demo` so the target is provisioned first",
+        "failed to build {GUEST_SOURCE} for {TARGET}\nstatus: {}\nstdout:\n{}\nstderr:\n{}\nhint: run `rustup target add --toolchain stable {TARGET}` or use `make wasi-network-demo` so the target is provisioned first",
         output.status,
         String::from_utf8_lossy(&output.stdout),
         stderr,
