@@ -45,10 +45,9 @@ git clone https://github.com/m4rba4s/wasmer-sectest.git
 cd wasmer-sectest/
 make menu
 make wasi-network-demo
-
-
-
 ```
+
+Repository: https://github.com/m4rba4s/wasmer-sectest/tree/main
 
 Inside the menu, use a number or alias such as `t`, `i`, `ops`, `c`, `e`, or `l`.
 Invalid input stays in the menu with a notice instead of exiting. Press Enter to
@@ -86,6 +85,17 @@ The integration test asserts both sides of the boundary: host telemetry must
 contain resolve/connect/payload/mock-response events, and guest stdout must
 contain the mocked JSON body. Fresh-machine installs provision the Rust
 `wasm32-wasip1` target automatically.
+
+## Portability
+
+The supported bootstrap path is `scripts/install.sh`: it provisions system
+build tools, Rust stable, `rustfmt`, `clippy`, and the `wasm32-wasip1` target,
+then runs fmt, tests, clippy, release build, and a menu smoke test. The checked
+local gate is:
+
+```bash
+bash scripts/install.sh --check --source-dir "$PWD"
+```
 
 ## Policy File
 

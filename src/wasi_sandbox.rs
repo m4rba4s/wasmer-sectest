@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::mem::MaybeUninit;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -33,6 +33,8 @@ const FAKE_PRIVATE_KEY: &[u8] =
     b"-----BEGIN OPENSSH PRIVATE KEY-----\nhoneypot-controlled-decoy\n-----END OPENSSH PRIVATE KEY-----\n";
 const DEFAULT_MOCK_JSON: &[u8] =
     br#"{"id":1,"name":"WASI honeypot user","source":"wasmer-sectest"}"#;
+const HONEYPOT_EVENT_CAPACITY: usize = 1024;
+const RESOLVED_HOST_CAPACITY: usize = 1024;
 const MAX_CAPTURED_REQUEST_BYTES: usize = 16 * 1024;
 const EPHEMERAL_PORT_BASE: u32 = 49_152;
 const EPHEMERAL_PORT_SPAN: u32 = 16_384;
@@ -48,6 +50,12 @@ pub struct HoneypotEvent {
     pub path: String,
     pub operation: HoneypotOperation,
     pub bytes_returned: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Decoy {
+    path: &'static str,
+    bytes: &'static [u8],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -140,12 +148,18 @@ impl NetworkHoneypot {
 
     fn record(&self, event: NetworkHoneypotEvent) {
         if let Ok(mut events) = self.inner.events.lock() {
+            enforce_capacity(&mut events, HONEYPOT_EVENT_CAPACITY);
             events.push(event);
         }
     }
 
     fn remember_host(&self, ip: IpAddr, host: &str) {
         if let Ok(mut hosts) = self.inner.resolved_hosts.lock() {
+            if hosts.len() >= RESOLVED_HOST_CAPACITY
+                && let Some(oldest) = hosts.keys().next().copied()
+            {
+                hosts.remove(&oldest);
+            }
             hosts.insert(ip, host.to_string());
         }
     }
@@ -237,16 +251,18 @@ impl VirtualNetworking for NetworkHoneypot {
         port: Option<u16>,
         _dns_server: Option<IpAddr>,
     ) -> Result<Vec<IpAddr>, NetworkError> {
-        let ip = deterministic_honeypot_ip(host);
-        self.remember_host(ip, host);
+        let addresses = deterministic_honeypot_ips(host);
+        for ip in addresses {
+            self.remember_host(ip, host);
+        }
         self.record(NetworkHoneypotEvent {
-            target: SocketAddr::new(ip, port.unwrap_or_default()),
+            target: SocketAddr::new(addresses[0], port.unwrap_or_default()),
             domain: Some(host.to_string()),
             operation: NetworkHoneypotOperation::ResolveIntercepted,
             payload: Vec::new(),
             mocked_response_bytes: 0,
         });
-        Ok(vec![ip])
+        Ok(addresses.to_vec())
     }
 }
 
@@ -582,6 +598,7 @@ impl HoneypotFileSystem {
 
     fn record(&self, event: HoneypotEvent) {
         if let Ok(mut events) = self.events.lock() {
+            enforce_capacity(&mut events, HONEYPOT_EVENT_CAPACITY);
             events.push(event);
         }
     }
@@ -603,9 +620,9 @@ impl FileSystem for HoneypotFileSystem {
     fn remove_dir(&self, path: &Path) -> virtual_fs::Result<()> {
         if let Some(decoy) = decoy_for(path) {
             self.record(HoneypotEvent {
-                path: normalized_path(path),
+                path: decoy.path.to_string(),
                 operation: HoneypotOperation::DenyMutation,
-                bytes_returned: decoy.len(),
+                bytes_returned: decoy.bytes.len(),
             });
             return Err(FsError::PermissionDenied);
         }
@@ -618,11 +635,11 @@ impl FileSystem for HoneypotFileSystem {
         to: &'a Path,
     ) -> Pin<Box<dyn Future<Output = virtual_fs::Result<()>> + Send + 'a>> {
         Box::pin(async move {
-            if decoy_for(from).is_some() || decoy_for(to).is_some() {
+            if let Some(decoy) = decoy_for(from).or_else(|| decoy_for(to)) {
                 self.record(HoneypotEvent {
-                    path: normalized_path(from),
+                    path: decoy.path.to_string(),
                     operation: HoneypotOperation::DenyMutation,
-                    bytes_returned: 0,
+                    bytes_returned: decoy.bytes.len(),
                 });
                 return Err(FsError::PermissionDenied);
             }
@@ -632,7 +649,7 @@ impl FileSystem for HoneypotFileSystem {
 
     fn metadata(&self, path: &Path) -> virtual_fs::Result<Metadata> {
         if let Some(decoy) = decoy_for(path) {
-            return Ok(file_metadata(decoy.len() as u64));
+            return Ok(file_metadata(decoy.bytes.len() as u64));
         }
         self.root.metadata(path)
     }
@@ -644,9 +661,9 @@ impl FileSystem for HoneypotFileSystem {
     fn remove_file(&self, path: &Path) -> virtual_fs::Result<()> {
         if let Some(decoy) = decoy_for(path) {
             self.record(HoneypotEvent {
-                path: normalized_path(path),
+                path: decoy.path.to_string(),
                 operation: HoneypotOperation::DenyMutation,
-                bytes_returned: decoy.len(),
+                bytes_returned: decoy.bytes.len(),
             });
             return Err(FsError::PermissionDenied);
         }
@@ -680,16 +697,16 @@ impl FileOpener for HoneypotFileSystem {
                 HoneypotOperation::ReadDecoy
             };
             self.record(HoneypotEvent {
-                path: normalized_path(path),
+                path: decoy.path.to_string(),
                 operation: operation.clone(),
-                bytes_returned: decoy.len(),
+                bytes_returned: decoy.bytes.len(),
             });
 
             if operation == HoneypotOperation::DenyMutation {
                 return Err(FsError::PermissionDenied);
             }
 
-            return Ok(Box::new(StaticFile::new(decoy)));
+            return Ok(Box::new(StaticFile::new(decoy.bytes)));
         }
 
         self.root
@@ -699,23 +716,51 @@ impl FileOpener for HoneypotFileSystem {
     }
 }
 
-fn decoy_for(path: &Path) -> Option<&'static [u8]> {
+fn decoy_for(path: &Path) -> Option<Decoy> {
     match normalized_path(path).as_str() {
-        "/etc/passwd" => Some(FAKE_PASSWD),
-        "/etc/shadow" => Some(FAKE_SHADOW),
-        "/root/.ssh/id_rsa" | "/home/app/.ssh/id_rsa" | "/home/user/.ssh/id_rsa" => {
-            Some(FAKE_PRIVATE_KEY)
-        }
+        "/etc/passwd" => Some(Decoy {
+            path: "/etc/passwd",
+            bytes: FAKE_PASSWD,
+        }),
+        "/etc/shadow" => Some(Decoy {
+            path: "/etc/shadow",
+            bytes: FAKE_SHADOW,
+        }),
+        "/root/.ssh/id_rsa" => Some(Decoy {
+            path: "/root/.ssh/id_rsa",
+            bytes: FAKE_PRIVATE_KEY,
+        }),
+        "/home/app/.ssh/id_rsa" => Some(Decoy {
+            path: "/home/app/.ssh/id_rsa",
+            bytes: FAKE_PRIVATE_KEY,
+        }),
+        "/home/user/.ssh/id_rsa" => Some(Decoy {
+            path: "/home/user/.ssh/id_rsa",
+            bytes: FAKE_PRIVATE_KEY,
+        }),
         _ => None,
     }
 }
 
 fn normalized_path(path: &Path) -> String {
-    let rendered = path.to_string_lossy();
-    if rendered.starts_with('/') {
-        rendered.into_owned()
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::RootDir | Component::CurDir => {}
+            Component::ParentDir => {
+                parts.pop();
+            }
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            Component::Prefix(prefix) => {
+                parts.push(prefix.as_os_str().to_string_lossy().into_owned())
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        "/".to_string()
     } else {
-        format!("/{rendered}")
+        format!("/{}", parts.join("/"))
     }
 }
 
@@ -734,11 +779,23 @@ fn has_complete_http_headers(payload: &[u8]) -> bool {
         || payload.windows(2).any(|window| window == b"\n\n")
 }
 
-fn deterministic_honeypot_ip(host: &str) -> IpAddr {
+fn deterministic_honeypot_ips(host: &str) -> [IpAddr; 2] {
     let hash = host
         .bytes()
         .fold(0u8, |acc, byte| acc.wrapping_mul(31).wrapping_add(byte));
-    IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10 + (hash % 200)))
+    [
+        IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10 + (hash % 200))),
+        IpAddr::V6(std::net::Ipv6Addr::new(
+            0x2001,
+            0x0db8,
+            u16::from(hash),
+            0,
+            0,
+            0,
+            0,
+            1,
+        )),
+    ]
 }
 
 fn unspecified_for(peer: IpAddr) -> IpAddr {
@@ -756,6 +813,18 @@ fn default_mock_http_response() -> Vec<u8> {
     .into_bytes();
     response.extend_from_slice(DEFAULT_MOCK_JSON);
     response
+}
+
+fn enforce_capacity<T>(events: &mut Vec<T>, capacity: usize) {
+    if capacity == 0 {
+        events.clear();
+        return;
+    }
+
+    if events.len() >= capacity {
+        let overflow = events.len() + 1 - capacity;
+        events.drain(..overflow);
+    }
 }
 
 #[cfg(test)]
@@ -789,6 +858,62 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn honeypot_canonicalizes_sensitive_path_aliases() {
+        let fs = HoneypotFileSystem::new();
+        let mut file = fs
+            .new_open_options()
+            .read(true)
+            .open("etc/../etc/./passwd")
+            .expect("canonicalized passwd alias opens");
+
+        let mut body = String::new();
+        file.read_to_string(&mut body)
+            .await
+            .expect("canonicalized decoy is readable");
+
+        assert!(body.contains("honeypot"));
+        assert_eq!(
+            fs.events(),
+            vec![HoneypotEvent {
+                path: "/etc/passwd".into(),
+                operation: HoneypotOperation::ReadDecoy,
+                bytes_returned: FAKE_PASSWD.len(),
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn honeypot_denies_rename_into_sensitive_alias() {
+        let fs = HoneypotFileSystem::new();
+        let result = fs
+            .rename(
+                Path::new("/tmp/source"),
+                Path::new("/root/../root/.ssh/./id_rsa"),
+            )
+            .await;
+
+        assert!(matches!(result, Err(FsError::PermissionDenied)));
+        assert_eq!(
+            fs.events(),
+            vec![HoneypotEvent {
+                path: "/root/.ssh/id_rsa".into(),
+                operation: HoneypotOperation::DenyMutation,
+                bytes_returned: FAKE_PRIVATE_KEY.len(),
+            }]
+        );
+    }
+
+    #[test]
+    fn honeypot_event_log_is_bounded() {
+        let fs = HoneypotFileSystem::new();
+        for _ in 0..(HONEYPOT_EVENT_CAPACITY + 8) {
+            let _ = fs.new_open_options().read(true).open("/etc/passwd");
+        }
+
+        assert_eq!(fs.events().len(), HONEYPOT_EVENT_CAPACITY);
+    }
+
     #[test]
     fn wasi_builder_uses_honeypot_filesystem() {
         let fs = HoneypotFileSystem::new();
@@ -804,8 +929,9 @@ mod tests {
             .await
             .expect("honeypot resolver returns synthetic address");
 
-        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved.len(), 2);
         assert!(matches!(resolved[0], IpAddr::V4(ip) if ip.octets()[0..3] == [203, 0, 113]));
+        assert!(matches!(resolved[1], IpAddr::V6(ip) if ip.segments()[0..2] == [0x2001, 0x0db8]));
         assert!(
             net.events().iter().any(|event| {
                 event.operation == NetworkHoneypotOperation::ResolveIntercepted
@@ -814,6 +940,19 @@ mod tests {
             "{:#?}",
             net.events()
         );
+    }
+
+    #[tokio::test]
+    async fn network_honeypot_event_log_is_bounded() {
+        let net = NetworkHoneypot::new();
+        for idx in 0..(HONEYPOT_EVENT_CAPACITY + 8) {
+            let host = format!("host-{idx}.example.invalid");
+            net.resolve(&host, Some(80), None)
+                .await
+                .expect("synthetic resolve succeeds");
+        }
+
+        assert_eq!(net.events().len(), HONEYPOT_EVENT_CAPACITY);
     }
 
     #[tokio::test]

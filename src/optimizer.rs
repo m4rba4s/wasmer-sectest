@@ -134,7 +134,9 @@ impl Optimizer {
             alphas.push(alpha);
         }
 
-        let last = self.history.last().unwrap();
+        let Some(last) = self.history.last() else {
+            return scale(grad, -1.0 / norm(grad).max(1.0));
+        };
         let yy = dot(&last.y, &last.y).max(1.0e-12);
         let gamma = (dot(&last.s, &last.y) / yy).clamp(1.0e-4, 1.0e2);
         let mut r = scale(&q, gamma);
