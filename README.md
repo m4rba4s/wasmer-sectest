@@ -13,7 +13,7 @@ used by the CLI.
 Continuous integration runs the harness on Ubuntu and macOS, plus Debian and
 Arch Linux containers for extra portability coverage.
 
-## Why This Exists
+## Theory part
 
 Wasmer gives the host a WebAssembly sandbox boundary, but a powerful or careless
 host import can reintroduce memory-safety, capability, and resource-exhaustion
