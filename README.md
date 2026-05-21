@@ -47,8 +47,6 @@ make menu
 make wasi-network-demo
 ```
 
-Repository: https://github.com/m4rba4s/wasmer-sectest/tree/main
-
 Inside the menu, use a number or alias such as `t`, `i`, `ops`, `c`, `e`, or `l`.
 Invalid input stays in the menu with a notice instead of exiting. Press Enter to
 redraw or return after a run, and type `q` to close the application. Menu runs are recorded under
